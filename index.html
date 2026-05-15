@@ -274,7 +274,7 @@ const L1 = [
       {text:'"Good. Document it."',delay:3600,sup:true},
       {text:"Level 1 complete.",delay:4800,cls:"good"},
     ],
-    btn:[{label:"proceed to level 2",go:"l2start"}]
+    btn:[{label:"proceed to level 2",go:"l2"}]
   },
   {
     // recite
@@ -286,10 +286,12 @@ const L1 = [
   }
 ];
 
-const L1map={recite:12};
+const L1map={recite:12,l2:()=>{ level=2; updateLevelBar(); runL2(); }};
 
 function runL1(idx){
-  const s=typeof idx==="string"? L1[L1map[idx]]: L1[idx];
+  const entry=typeof idx==="string"? L1map[idx]: null;
+  if(typeof entry==="function"){ entry(); return; }
+  const s=entry!==null && entry!==undefined ? L1[entry] : L1[idx];
   archiveScene();
   renderLines(s.lines,22,()=>{
     addButtons(s.btn.map(b=>({
