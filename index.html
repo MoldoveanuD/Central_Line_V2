@@ -139,22 +139,20 @@ function archiveScene(){
 function renderLines(lines, speed, onDone){
   sceneEl.innerHTML=""; actionsEl.innerHTML=""; scoreBarEl.innerHTML="";
   clearTimers();
-  let lastDelay=0;
-  lines.forEach((line,i)=>{
+  lines.forEach((line)=>{
     const p=document.createElement("p");
     let cls="line";
     if(line.sup) cls+=" sup";
     if(line.cls) cls+=" "+line.cls;
     p.className=cls;
+    p.textContent=line.text;
     sceneEl.appendChild(p);
-    const t=setTimeout(()=>{ typeText(p,line.text,speed||22,()=>scrollBottom()); },line.delay||0);
-    timers.push(t);
-    lastDelay=Math.max(lastDelay,(line.delay||0)+((line.text||"").length*(speed||22))+200);
   });
   if(onDone){
-    const t=setTimeout(()=>{ onDone(); updateScore(); scrollBottom(); },lastDelay+200);
+    const t=setTimeout(()=>{ onDone(); updateScore(); scrollBottom(); },50);
     timers.push(t);
   }
+  scrollBottom();
 }
 
 function addButtons(btns){
@@ -289,14 +287,20 @@ const L1 = [
 const L1map={recite:12,l2:()=>{ level=2; updateLevelBar(); runL2(); }};
 
 function runL1(idx){
-  const entry=typeof idx==="string"? L1map[idx]: null;
-  if(typeof entry==="function"){ entry(); return; }
-  const s=entry!==null && entry!==undefined ? L1[entry] : L1[idx];
+  // If idx is a string, check L1map
+  if(typeof idx==="string"){
+    const entry=L1map[idx];
+    if(typeof entry==="function"){ entry(); return; }
+    if(typeof entry==="number"){ idx=entry; }
+    else{ console.error("Unknown L1 key:", idx); return; }
+  }
+  const s=L1[idx];
+  if(!s){ console.error("No L1 scene at index:", idx); return; }
   archiveScene();
   renderLines(s.lines,22,()=>{
     addButtons(s.btn.map(b=>({
       label:b.label,
-      action:()=>{ archiveScene(); runL1(b.go); }
+      action:()=>{ runL1(b.go); }
     })));
   });
 }
