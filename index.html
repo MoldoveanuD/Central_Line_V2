@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>The Procedure Room</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0e0e0e;--text:#d4d0c8;--muted:#6b6860;--sup:#8a8478;
+  --border:#2a2a28;--btn:#3a3a38;--btn-hover:#1a1a18;--accent:#4a4a48;
+  --green:#4a7c59;--red:#7c4a4a;--yellow:#7c6e4a;
+  --font:"Courier New",Courier,monospace;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:15px;line-height:1.75;min-height:100vh;padding:3rem 1.5rem 5rem}
+#app{max-width:580px;margin:0 auto}
+#header{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:.5rem;opacity:.5}
+#level-bar{font-size:11px;letter-spacing:.08em;color:var(--muted);margin-bottom:2.5rem;display:flex;gap:1.5rem}
+.lvl-dot{opacity:.3}.lvl-dot.active{opacity:1;color:var(--text)}.lvl-dot.done{opacity:.6;color:var(--green)}
+#log .scene-gap{margin-bottom:1.4rem}
+#log .line{opacity:.2;font-size:14px;margin-bottom:.4rem}
+#log .line.sup{font-style:italic;color:var(--sup);padding-left:1rem;border-left:2px solid var(--accent)}
+.line{margin-bottom:.65rem;min-height:1.6em}
+.line.sup{font-style:italic;color:var(--sup);padding-left:1rem;border-left:2px solid var(--accent)}
+.line.good{color:#6aaa7a}.line.bad{color:#aa6a6a}.line.warn{color:#aa9a5a}
+.cursor{opacity:.4;animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:0}}
+#actions{margin-top:1.8rem;display:flex;flex-wrap:wrap;gap:10px;min-height:40px}
+button{background:transparent;border:.5px solid var(--btn);border-radius:6px;padding:8px 16px;font-size:13px;font-family:var(--font);color:var(--text);cursor:pointer;letter-spacing:.04em;transition:background .15s}
+button:hover{background:var(--btn-hover)}
+button:active{transform:scale(.98)}
+button.correct{border-color:var(--green);color:#6aaa7a}
+button.wrong{border-color:var(--red);color:#aa6a6a}
+button.disabled{opacity:.35;pointer-events:none}
+#score-bar{margin-top:2rem;font-size:12px;color:var(--muted);letter-spacing:.05em}
+#score-bar span{color:var(--text)}
+
+/* Certificate */
+#certificate{display:none;border:1px solid var(--accent);padding:2.5rem 2rem;margin-top:2rem;text-align:center;line-height:2}
+#certificate h1{font-size:16px;letter-spacing:.15em;text-transform:uppercase;margin-bottom:1rem;color:var(--text)}
+#certificate p{font-size:13px;color:var(--muted);margin-bottom:.5rem}
+#certificate .name{font-size:18px;color:var(--text);border-bottom:1px solid var(--accent);padding-bottom:.5rem;margin:.8rem 0}
+#certificate .stamp{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin-top:1.5rem}
+#certificate .sim-invite{margin-top:1.5rem;padding:1rem;border:1px solid var(--green);color:#6aaa7a;font-size:13px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">central line insertion · ultrasound-guided · right internal jugular</div>
+  <div id="level-bar">
+    <span class="lvl-dot" id="dot1">● LEVEL 1: GUIDED</span>
+    <span class="lvl-dot" id="dot2">● LEVEL 2: PROMPTED</span>
+    <span class="lvl-dot" id="dot3">● LEVEL 3: INDEPENDENT</span>
+  </div>
+  <div id="log"></div>
+  <div id="scene"></div>
+  <div id="actions"></div>
+  <div id="score-bar"></div>
+  <div id="certificate">
+    <h1>Certificate of Completion</h1>
+    <p>This certifies that</p>
+    <div class="name" id="cert-name">—</div>
+    <p>has successfully completed all three levels of</p>
+    <p><strong>The Procedure Room</strong></p>
+    <p style="font-size:12px;margin-top:.3rem">Ultrasound-Guided Central Venous Catheter Insertion<br>Right Internal Jugular · Seldinger Technique</p>
+    <div class="stamp">✓ Guided · ✓ Prompted · ✓ Independent</div>
+    <div class="sim-invite">
+      You are now invited to complete your training in person.<br>
+      <strong>Report to the Simulation Lab</strong> to perform this procedure<br>
+      on a high-fidelity mannequin under faculty supervision.<br><br>
+      Present this certificate to the Sim Lab coordinator<br>
+      to book your session.
+    </div>
+    <p style="font-size:11px;margin-top:1.5rem;color:var(--muted)">Issued: <span id="cert-date"></span></p>
+  </div>
+</div>
+
+<script>
+// ─── STATE ────────────────────────────────────────────────────────────────────
+let level = 1;
+let mistakes = 0;
+let score = 0;
+let totalQ = 0;
+let complicationActive = false;
+let timers = [];
+let logEntries = [];
+
+const logEl = document.getElementById("log");
+const sceneEl = document.getElementById("scene");
+const actionsEl = document.getElementById("actions");
+const scoreBarEl = document.getElementById("score-bar");
+
+// ─── TYPING ENGINE ────────────────────────────────────────────────────────────
+function clearTimers(){ timers.forEach(clearTimeout); timers=[]; }
+
+function typeText(el, text, speed, onDone){
+  let i=0;
+  const cur=document.createElement("span");
+  cur.className="cursor"; cur.textContent="▋";
+  el.appendChild(cur);
+  const iv=setInterval(()=>{
+    i++;
+    el.textContent=text.slice(0,i);
+    el.appendChild(cur);
+    if(i>=text.length){ clearInterval(iv); cur.remove(); if(onDone) onDone(); }
+  },speed);
+}
+
+function scrollBottom(){ window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"}); }
+
+function updateLevelBar(){
+  [1,2,3].forEach(n=>{
+    const d=document.getElementById("dot"+n);
+    d.className="lvl-dot";
+    if(n<level) d.classList.add("done");
+    else if(n===level) d.classList.add("active");
+  });
+}
+
+function updateScore(){
+  if(level===1){ scoreBarEl.innerHTML=""; return; }
+  scoreBarEl.innerHTML=`Score: <span>${score}/${totalQ}</span> &nbsp;|&nbsp; Mistakes: <span>${mistakes}</span>`;
+}
+
+// ─── SCENE RENDERER ───────────────────────────────────────────────────────────
+function archiveScene(){
+  const lines=Array.from(sceneEl.querySelectorAll(".line"));
+  if(!lines.length) return;
+  const gap=document.createElement("div"); gap.className="scene-gap";
+  lines.forEach(l=>{
+    const p=document.createElement("p");
+    p.className="line"+(l.classList.contains("sup")?" sup":"");
+    p.textContent=l.textContent;
+    gap.appendChild(p);
+  });
+  logEl.appendChild(gap);
+}
+
+function renderLines(lines, speed, onDone){
+  sceneEl.innerHTML=""; actionsEl.innerHTML=""; scoreBarEl.innerHTML="";
+  clearTimers();
+  let lastDelay=0;
+  lines.forEach((line,i)=>{
+    const p=document.createElement("p");
+    let cls="line";
+    if(line.sup) cls+=" sup";
+    if(line.cls) cls+=" "+line.cls;
+    p.className=cls;
+    sceneEl.appendChild(p);
+    const t=setTimeout(()=>{ typeText(p,line.text,speed||22,()=>scrollBottom()); },line.delay||0);
+    timers.push(t);
+    lastDelay=Math.max(lastDelay,(line.delay||0)+((line.text||"").length*(speed||22))+200);
+  });
+  if(onDone){
+    const t=setTimeout(()=>{ onDone(); updateScore(); scrollBottom(); },lastDelay+200);
+    timers.push(t);
+  }
+}
+
+function addButtons(btns){
+  actionsEl.innerHTML="";
+  btns.forEach(b=>{
+    const btn=document.createElement("button");
+    btn.textContent=b.label;
+    btn.onclick=()=>b.action(btn);
+    actionsEl.appendChild(btn);
+  });
+  scrollBottom();
+}
+
+// ─── LEVEL 1: GUIDED ─────────────────────────────────────────────────────────
+const L1 = [
+  {
+    lines:[
+      {text:"The room is dark.",delay:0},
+      {text:"A monitor blinks. A patient breathes.",delay:1200},
+      {text:"You are here. You don't know why yet.",delay:2400},
+    ],
+    btn:[{label:"look around",go:1}]
+  },
+  {
+    lines:[
+      {text:"The overhead light hums to life.",delay:0},
+      {text:"A procedural tray sits covered in blue drape. An ultrasound machine waits in the corner.",delay:900},
+      {text:"The patient is a 58-year-old man. His IV access failed twice tonight. His blood pressure is trending down.",delay:2200},
+      {text:"A voice, quiet, from beside the door:",delay:3600},
+      {text:'"He needs a central line. You\'ve read about this. Now you\'ll do it."',delay:4300,sup:true},
+    ],
+    btn:[{label:"check the patient",go:2},{label:"examine the tray",go:3}]
+  },
+  {
+    lines:[
+      {text:"He is supine. Wristband reads: R. MOREAU.",delay:0},
+      {text:"Sepsis protocol initiated. No bleeding disorder. No prior neck surgery.",delay:1100},
+      {text:"Right internal jugular vein is your target.",delay:2200},
+      {text:'"Trendelenburg. Head turned left. It distends the vein."',delay:3200,sup:true},
+    ],
+    btn:[{label:"position the patient",go:4},{label:"examine the tray",go:3}]
+  },
+  {
+    lines:[
+      {text:"You lift the drape.",delay:0},
+      {text:"Central line kit. Chlorhexidine swabs. Sterile drapes. 10 mL syringe. Finder needle. J-tipped guidewire. Dilator. Triple-lumen catheter, 7 French.",delay:900},
+      {text:'"Name the steps before you touch anything."',delay:2600,sup:true},
+    ],
+    btn:[{label:"recite the steps",go:"recite"},{label:"check the patient",go:2}]
+  },
+  {
+    lines:[
+      {text:"Bed down fifteen degrees. Head turned left.",delay:0},
+      {text:"The sternocleidomastoid triangle comes into view.",delay:1100},
+      {text:'"The vein is medial to the carotid. Don\'t forget that."',delay:2200,sup:true},
+    ],
+    btn:[{label:"prep and drape the field",go:5}]
+  },
+  {
+    lines:[
+      {text:"Chlorhexidine in wide circles. Thirty seconds to dry.",delay:0},
+      {text:"Sterile drapes. Only the neck is exposed.",delay:1200},
+      {text:"You are scrubbed in. The world outside the drape no longer exists.",delay:2200},
+    ],
+    btn:[{label:"pick up the ultrasound probe",go:6}]
+  },
+  {
+    lines:[
+      {text:"The screen wakes. Gray and black. A cross-section of the neck.",delay:0},
+      {text:"Two circles. The vein: larger, soft-walled, compressible. The artery: smaller, pulsing, bright.",delay:1100},
+      {text:"You press gently. The vein collapses. The artery does not.",delay:2400},
+      {text:'"Good. You found it. Mark your entry point."',delay:3400,sup:true},
+    ],
+    btn:[{label:"advance the needle",go:7}]
+  },
+  {
+    lines:[
+      {text:"Finder needle. Bevel up. Forty-five degrees toward the ipsilateral nipple.",delay:0},
+      {text:"The needle tip — a bright dot — moves toward the vessel.",delay:1200},
+      {text:"You aspirate.",delay:2400},
+      {text:"Dark, non-pulsatile blood fills the syringe.",delay:3200},
+      {text:"Venous blood. You are in.",delay:4000},
+      {text:'"Don\'t move the needle. Not even a millimeter."',delay:4800,sup:true},
+    ],
+    btn:[{label:"advance the guidewire",go:8}]
+  },
+  {
+    lines:[
+      {text:"The J-tipped wire feeds through. Smooth. No resistance.",delay:0},
+      {text:"You watch the monitor. Rhythm unchanged.",delay:1200},
+      {text:'"If you see ectopy, pull back slightly."',delay:2200,sup:true},
+      {text:"Needle removed. Wire in place.",delay:3400},
+    ],
+    btn:[{label:"dilate the tract",go:9}]
+  },
+  {
+    lines:[
+      {text:"Small nick at the skin entry. Dilator over wire. Resistance — a twist — it gives.",delay:0},
+      {text:"Dilator removed. Wire still in sight.",delay:1500},
+      {text:'"The wire must never disappear into the patient. Never."',delay:2400,sup:true},
+    ],
+    btn:[{label:"advance the catheter",go:10}]
+  },
+  {
+    lines:[
+      {text:"Catheter over wire to fifteen centimeters. Wire removed.",delay:0},
+      {text:"Blood aspirates freely from every lumen. Flushed.",delay:1300},
+      {text:"Sutured. Sterile dressing applied.",delay:2200},
+    ],
+    btn:[{label:"confirm placement",go:11}]
+  },
+  {
+    lines:[
+      {text:"Chest X-ray ordered.",delay:0},
+      {text:"Catheter tip at the cavoatrial junction. No pneumothorax. No hemothorax.",delay:1200},
+      {text:"Pressure stabilizing. Vasopressors running.",delay:2600},
+      {text:'"Good. Document it."',delay:3600,sup:true},
+      {text:"Level 1 complete.",delay:4800,cls:"good"},
+    ],
+    btn:[{label:"proceed to level 2",go:"l2start"}]
+  },
+  {
+    // recite
+    lines:[
+      {text:"Position. Landmark. Prep and drape. Ultrasound. Access. Wire. Dilate. Catheter. Confirm.",delay:0},
+      {text:'"Seldinger technique. Don\'t rush the wire."',delay:1800,sup:true},
+    ],
+    btn:[{label:"position the patient",go:4}]
+  }
+];
+
+const L1map={recite:12};
+
+function runL1(idx){
+  const s=typeof idx==="string"? L1[L1map[idx]]: L1[idx];
+  archiveScene();
+  renderLines(s.lines,22,()=>{
+    addButtons(s.btn.map(b=>({
+      label:b.label,
+      action:()=>{ archiveScene(); runL1(b.go); }
+    })));
+  });
+}
+
+// ─── LEVEL 2: PROMPTED ────────────────────────────────────────────────────────
+// Multi-choice questions. Wrong answers → complication → management branch.
+
+function mkQ(question, options, correctIdx, wrongLines, managementBtn, afterCorrect){
+  // question: string
+  // options: [{label}]
+  // correctIdx: int
+  // wrongLines: lines to show on wrong
+  // managementBtn: label for management action that leads back
+  // afterCorrect: function to call
+  return function(){
+    totalQ++;
+    archiveScene();
+    renderLines([{text:question,delay:0}],18,()=>{
+      const btns=options.map((o,i)=>({
+        label:o.label,
+        action:(btn)=>{
+          // disable all
+          Array.from(actionsEl.children).forEach(b=>b.classList.add("disabled"));
+          if(i===correctIdx){
+            btn.classList.add("correct");
+            score++;
+            updateScore();
+            setTimeout(()=>{ afterCorrect(); },700);
+          } else {
+            btn.classList.add("wrong");
+            mistakes++;
+            updateScore();
+            // show complication
+            setTimeout(()=>{
+              archiveScene();
+              renderLines(wrongLines,18,()=>{
+                addButtons([{label:managementBtn,action:()=>{
+                  archiveScene();
+                  afterCorrect(); // resume after managing
+                }}]);
+              });
+            },800);
+          }
+        }
+      }));
+      addButtons(btns);
+    });
+  };
+}
+
+function runL2(){
+  updateLevelBar();
+  mistakes=0; score=0; totalQ=0;
+  archiveScene();
+
+  // Intro
+  renderLines([
+    {text:"The room again. But the light is already on.",delay:0},
+    {text:"Moreau is back. Different night. Same stakes.",delay:1000},
+    {text:"The supervisor stands in the corner, arms folded. She will not lead you this time.",delay:2200},
+    {text:"Show her what you know.",delay:3400},
+  ],18,()=>{
+    addButtons([{label:"begin",action:l2_equipment}]);
+  });
+}
+
+function l2_equipment(){
+  totalQ++;
+  archiveScene();
+  renderLines([{text:"The tray is uncovered. Select the items you need for this procedure.",delay:0}],18,()=>{
+    const items=[
+      "Triple-lumen central venous catheter",
+      "J-tipped guidewire",
+      "Chlorhexidine swabs",
+      "Arterial line kit",
+      "Finder needle + syringe",
+      "Dilator",
+      "NG tube",
+      "Sterile drapes",
+      "Foley catheter",
+      "10 mL saline flushes",
+    ];
+    const correct=new Set([0,1,2,4,5,7,9]);
+    const selected=new Set();
+    actionsEl.innerHTML="";
+
+    const confirmBtn=document.createElement("button");
+    confirmBtn.textContent="confirm selection";
+    confirmBtn.style.borderColor="var(--green)";
+    confirmBtn.style.display="none";
+
+    items.forEach((item,i)=>{
+      const btn=document.createElement("button");
+      btn.textContent=item;
+      btn.onclick=()=>{
+        if(selected.has(i)){ selected.delete(i); btn.classList.remove("correct"); }
+        else { selected.add(i); btn.classList.add("correct"); }
+        confirmBtn.style.display=selected.size>0?"inline-block":"none";
+      };
+      actionsEl.appendChild(btn);
+    });
+    actionsEl.appendChild(confirmBtn);
+
+    confirmBtn.onclick=()=>{
+      const wrong=[...selected].filter(i=>!correct.has(i));
+      const missed=[...correct].filter(i=>!selected.has(i));
+      Array.from(actionsEl.children).forEach(b=>b.classList.add("disabled"));
+      if(wrong.length===0 && missed.length===0){
+        score++;
+        setTimeout(()=>{ archiveScene(); l2_position(); },600);
+      } else {
+        mistakes++;
+        updateScore();
+        const feedback=[];
+        if(wrong.length) feedback.push({text:`Incorrect items selected: ${wrong.map(i=>items[i]).join(", ")}.`,delay:0,cls:"bad"});
+        if(missed.length) feedback.push({text:`Items you missed: ${missed.map(i=>items[i]).join(", ")}.`,delay:800,cls:"warn"});
+        feedback.push({text:"The supervisor re-lays the tray without a word.",delay:1800,sup:true});
+        setTimeout(()=>{
+          archiveScene();
+          renderLines(feedback,18,()=>{
+            addButtons([{label:"try again",action:l2_equipment}]);
+          });
+        },600);
+      }
+    };
+    scrollBottom();
+  });
+}
+
+function l2_position(){
+  mkQ(
+    "Before inserting the needle, how do you position the patient?",
+    [
+      {label:"Supine, head midline, bed flat"},
+      {label:"Trendelenburg, head turned left"},
+      {label:"Reverse Trendelenburg, head turned right"},
+      {label:"Semi-recumbent, head midline"},
+    ],
+    1,
+    [
+      {text:"The neck veins are flat. The angle is wrong.",delay:0,cls:"bad"},
+      {text:"You advance the needle. Resistance. Nothing aspirates.",delay:1200},
+      {text:'"Stop. Reposition. Trendelenburg. Head left. Always."',delay:2400,sup:true},
+    ],
+    "reposition correctly",
+    l2_landmark
+  )();
+}
+
+function l2_landmark(){
+  mkQ(
+    "On ultrasound, you see two circular structures. How do you confirm which is the internal jugular vein?",
+    [
+      {label:"The brighter, pulsatile structure"},
+      {label:"The larger, compressible, non-pulsatile structure"},
+      {label:"The deeper of the two structures"},
+      {label:"The one medial to the sternocleidomastoid"},
+    ],
+    1,
+    [
+      {text:"You compress. The structure does not collapse.",delay:0,cls:"bad"},
+      {text:"Pulsatile. Bright. You have the artery.",delay:1200,cls:"bad"},
+      {text:"You withdraw immediately.",delay:2000},
+      {text:"Hold pressure for ten minutes.",delay:2800},
+      {text:'"The vein compresses. The artery does not. This is the most important distinction you will ever make in this room."',delay:3800,sup:true},
+    ],
+    "recheck and proceed",
+    l2_needle_angle
+  )();
+}
+
+function l2_needle_angle(){
+  mkQ(
+    "You are ready to insert the finder needle. What is the correct angle and direction?",
+    [
+      {label:"90° perpendicular to the skin"},
+      {label:"30° toward the contralateral shoulder"},
+      {label:"45° toward the ipsilateral nipple"},
+      {label:"60° toward the chin"},
+    ],
+    2,
+    [
+      {text:"The needle goes deep. No flash.",delay:0,cls:"bad"},
+      {text:"You redirect. The syringe fills — but the blood is bright. Pulsatile.",delay:1400,cls:"bad"},
+      {text:"Arterial puncture.",delay:2400,cls:"bad"},
+      {text:"Withdraw. Firm pressure. Wait.",delay:3000},
+      {text:'"45 degrees. Always toward the ipsilateral nipple. The angle keeps you out of the artery."',delay:4000,sup:true},
+    ],
+    "apply pressure and retry",
+    l2_blood_check
+  )();
+}
+
+function l2_blood_check(){
+  mkQ(
+    "Dark, non-pulsatile blood fills the syringe. What does this confirm, and what do you do next?",
+    [
+      {label:"Arterial placement — withdraw immediately"},
+      {label:"Venous placement — advance the guidewire now"},
+      {label:"Venous placement — remove the needle and recheck"},
+      {label:"Uncertain — send the blood for a gas to confirm"},
+    ],
+    1,
+    [
+      {text:"You withdraw the needle.",delay:0,cls:"bad"},
+      {text:"The access is lost. The patient's pressure ticks down.",delay:1200,cls:"bad"},
+      {text:'"Dark and non-pulsatile is venous. When you have it — hold the needle. The wire goes in next. You do not move."',delay:2200,sup:true},
+    ],
+    "regain access and continue",
+    l2_wire
+  )();
+}
+
+function l2_wire(){
+  mkQ(
+    "The wire is advancing. The monitor shows three consecutive PVCs. What do you do?",
+    [
+      {label:"Pull the wire back slightly and wait"},
+      {label:"Advance the wire further to pass the arrhythmia focus"},
+      {label:"Remove the wire entirely and start over"},
+      {label:"Ignore it — PVCs are expected"},
+    ],
+    0,
+    [
+      {text:"You advance. The PVCs become a run of VT.",delay:0,cls:"bad"},
+      {text:"The monitor alarms. The nurse calls a code.",delay:1200,cls:"bad"},
+      {text:"You pull the wire back. Rhythm recovers after thirty seconds.",delay:2200},
+      {text:'"The wire in the right atrium causes ectopy. Pull back. Always. Never push through arrhythmia."',delay:3400,sup:true},
+    ],
+    "stabilize and continue",
+    l2_pneumo
+  )();
+}
+
+function l2_pneumo(){
+  mkQ(
+    "The catheter is placed. Post-procedure chest X-ray shows a small apical lucency on the right. What is this and what do you do?",
+    [
+      {label:"Normal post-procedure finding — no action needed"},
+      {label:"Pneumothorax — apply oxygen, monitor, consider chest tube if >2 cm or symptomatic"},
+      {label:"Hemothorax — start IV fluids immediately"},
+      {label:"Air embolism — place patient in Trendelenburg left lateral decubitus"},
+    ],
+    1,
+    [
+      {text:"You sign the procedure note and leave.",delay:0,cls:"bad"},
+      {text:"An hour later, Moreau's oxygen saturation falls to 84%.",delay:1200,cls:"bad"},
+      {text:"Emergency chest tube placed by the senior resident.",delay:2200,cls:"bad"},
+      {text:'"Any lucency after a central line is a pneumothorax until proven otherwise. Check it. Measure it. Act on it."',delay:3400,sup:true},
+    ],
+    "manage the pneumothorax",
+    l2_complete
+  )();
+}
+
+function l2_complete(){
+  archiveScene();
+  const pct=Math.round((score/totalQ)*100);
+  const passed=mistakes<=2;
+  renderLines([
+    {text:"The line is in. The complication is managed. Moreau is stable.",delay:0},
+    {text:`Level 2 complete. Score: ${score}/${totalQ} (${pct}%). Mistakes: ${mistakes}.`,delay:1400,cls:passed?"good":"warn"},
+    passed
+      ? {text:"You demonstrate a working knowledge of the procedure.",delay:2800,cls:"good"}
+      : {text:"You passed, but review your errors before proceeding.",delay:2800,cls:"warn"},
+  ],18,()=>{
+    addButtons([{label:"proceed to level 3",action:runL3}]);
+  });
+}
+
+// ─── LEVEL 3: INDEPENDENT ─────────────────────────────────────────────────────
+
+function runL3(){
+  level=3; updateLevelBar();
+  mistakes=0; score=0; totalQ=0;
+  archiveScene();
+
+  renderLines([
+    {text:"The room is dark.",delay:0},
+    {text:"No supervisor. No voice from the doorway.",delay:1400},
+    {text:"A patient. A tray. A task.",delay:2600},
+    {text:"You know what to do.",delay:3600},
+  ],18,()=>{
+    addButtons([{label:"begin",action:l3_indication}]);
+  });
+}
+
+function l3_indication(){
+  mkQ(
+    "Moreau has no IV access, septic shock, and requires vasopressors. Which of these is NOT a valid indication for a central venous catheter?",
+    [
+      {label:"Vasopressor infusion"},
+      {label:"CVP monitoring"},
+      {label:"Routine blood draws in a stable patient with good peripheral access"},
+      {label:"Rapid volume resuscitation"},
+    ],
+    2,
+    [
+      {text:"Central lines carry significant risk: infection, thrombosis, pneumothorax.",delay:0,cls:"bad"},
+      {text:"Inserting one when good peripheral access exists exposes the patient to unnecessary harm.",delay:1200,cls:"bad"},
+      {text:"Indications must justify the risk. Always.",delay:2400,cls:"warn"},
+    ],
+    "reconsider and proceed",
+    l3_contraindications
+  )();
+}
+
+function l3_contraindications(){
+  mkQ(
+    "Before proceeding, which finding would most concern you as a relative contraindication to the right IJ approach?",
+    [
+      {label:"History of right-sided pneumothorax, now resolved"},
+      {label:"Prior right neck surgery with possible scarring"},
+      {label:"Patient on aspirin"},
+      {label:"BMI of 32"},
+    ],
+    1,
+    [
+      {text:"Scarring from prior surgery distorts anatomy and increases the risk of vessel injury and failed access.",delay:0,cls:"bad"},
+      {text:"You proceed. The needle hits fibrous tissue. Multiple passes. A hematoma forms.",delay:1400,cls:"bad"},
+      {text:"Consider the contralateral side or femoral approach when anatomy is compromised.",delay:2800,cls:"warn"},
+    ],
+    "reassess and choose a safe approach",
+    l3_sequence
+  )();
+}
+
+function l3_sequence(){
+  totalQ++;
+  archiveScene();
+  renderLines([{text:"Place the procedural steps in the correct order. Select them one by one.",delay:0}],18,()=>{
+    const steps=[
+      "Confirm placement with CXR",
+      "Ultrasound identification of vessel",
+      "Advance guidewire",
+      "Patient positioning",
+      "Prep and drape",
+      "Catheter insertion",
+      "Dilate the tract",
+      "Needle insertion and aspiration",
+    ];
+    const correctOrder=[3,4,1,7,2,6,5,0];
+    const order=[];
+    const btns={};
+
+    actionsEl.innerHTML="";
+    const orderDisplay=document.createElement("p");
+    orderDisplay.style.cssText="font-size:12px;color:var(--muted);margin-bottom:.8rem;min-height:1.2em";
+    orderDisplay.textContent="Selected: —";
+    actionsEl.appendChild(orderDisplay);
+
+    steps.forEach((s,i)=>{
+      const btn=document.createElement("button");
+      btn.textContent=s;
+      btn.onclick=()=>{
+        if(order.includes(i)) return;
+        order.push(i);
+        btn.classList.add("correct"); btn.classList.add("disabled");
+        orderDisplay.textContent="Selected: "+order.map(x=>steps[x]).join(" → ");
+        if(order.length===steps.length){
+          Array.from(actionsEl.children).forEach(b=>b.classList.add("disabled"));
+          const isCorrect=order.every((v,i)=>v===correctOrder[i]);
+          setTimeout(()=>{
+            if(isCorrect){
+              score++;
+              archiveScene();
+              renderLines([{text:"Correct sequence. Proceed.",delay:0,cls:"good"}],18,()=>{
+                addButtons([{label:"continue",action:l3_complication_set}]);
+              });
+            } else {
+              mistakes++;
+              updateScore();
+              archiveScene();
+              renderLines([
+                {text:"Incorrect sequence.",delay:0,cls:"bad"},
+                {text:"Correct order: "+correctOrder.map(i=>steps[i]).join(" → "),delay:900,cls:"warn"},
+              ],18,()=>{
+                addButtons([{label:"continue",action:l3_complication_set}]);
+              });
+            }
+          },600);
+        }
+      };
+      btns[i]=btn;
+      actionsEl.appendChild(btn);
+    });
+    scrollBottom();
+  });
+}
+
+function l3_complication_set(){
+  mkQ(
+    "During dilation, bright red pulsatile blood suddenly wells up around the dilator. What has happened and what is your immediate action?",
+    [
+      {label:"Venous ooze — apply light pressure and continue"},
+      {label:"Arterial injury — remove dilator, hold firm pressure for at least 10 minutes, do not place catheter, call for help"},
+      {label:"Arterial injury — place the catheter anyway to tamponade the vessel"},
+      {label:"Normal finding — the dilator has entered the subclavian vein"},
+    ],
+    1,
+    [
+      {text:"You advance the catheter. The hematoma expands rapidly.",delay:0,cls:"bad"},
+      {text:"The airway is now at risk. Vascular surgery is called.",delay:1400,cls:"bad"},
+      {text:"A dilator in the artery must be removed under direct pressure. Never place a catheter through an arterial injury.",delay:2800,cls:"warn"},
+    ],
+    "manage the arterial injury",
+    l3_air_embolism
+  )();
+}
+
+function l3_air_embolism(){
+  mkQ(
+    "While removing the wire, the patient suddenly desaturates and becomes hypotensive. A churning sound is heard on auscultation. What is the most likely diagnosis and first action?",
+    [
+      {label:"Tension pneumothorax — needle decompression immediately"},
+      {label:"Air embolism — clamp the catheter, left lateral decubitus Trendelenburg, 100% O₂, call for help"},
+      {label:"Vasovagal syncope — atropine IV"},
+      {label:"PE — start heparin"},
+    ],
+    1,
+    [
+      {text:"You needle the chest. No improvement.",delay:0,cls:"bad"},
+      {text:"The churning mill-wheel murmur is pathognomonic for air embolism.",delay:1400,cls:"bad"},
+      {text:"Air in the right heart is trapped by positioning: left lateral decubitus Trendelenburg moves it away from the outflow tract.",delay:2800,cls:"warn"},
+    ],
+    "manage the air embolism",
+    l3_wire_lost
+  )();
+}
+
+function l3_wire_lost(){
+  mkQ(
+    "You release the guidewire momentarily to adjust your grip. It disappears into the patient. What do you do?",
+    [
+      {label:"Attempt to retrieve it with your fingers"},
+      {label:"Do not panic — call for interventional radiology immediately for fluoroscopic retrieval"},
+      {label:"Leave it — it will pass harmlessly"},
+      {label:"Place the catheter over where you think the wire is"},
+    ],
+    1,
+    [
+      {text:"A retained guidewire is a sentinel event.",delay:0,cls:"bad"},
+      {text:"It can migrate to the heart, cause arrhythmia, or perforate a vessel.",delay:1200,cls:"bad"},
+      {text:"Immediate escalation and fluoroscopic retrieval are mandatory. The wire must never leave your hand.",delay:2400,cls:"warn"},
+    ],
+    "escalate appropriately",
+    l3_documentation
+  )();
+}
+
+function l3_documentation(){
+  mkQ(
+    "The line is placed, confirmed, and the patient is stable. What must your procedure note include?",
+    [
+      {label:"Site, technique, number of attempts, catheter type, confirmation method, complications"},
+      {label:"Time of procedure and your name only"},
+      {label:"Verbal handoff to the nurse is sufficient"},
+      {label:"Site and catheter type only"},
+    ],
+    0,
+    [
+      {text:"Incomplete documentation creates medico-legal risk and communication failures.",delay:0,cls:"bad"},
+      {text:"Every procedural note must include: indication, consent, site, technique, attempts, findings, complications, and confirmation.",delay:1400,cls:"warn"},
+    ],
+    "complete the documentation",
+    l3_complete
+  )();
+}
+
+function l3_complete(){
+  archiveScene();
+  const pct=Math.round((score/totalQ)*100);
+  const passed=pct>=70;
+  renderLines([
+    {text:"The procedure is done.",delay:0},
+    {text:"The room is quiet.",delay:1000},
+    {text:`Final score: ${score}/${totalQ} (${pct}%). Total mistakes across all levels: ${mistakes}.`,delay:2000,cls:passed?"good":"warn"},
+    passed
+      ? {text:"You have demonstrated independent procedural knowledge.",delay:3400,cls:"good"}
+      : {text:"Review the concepts above and repeat the level.",delay:3400,cls:"warn"},
+  ],18,()=>{
+    if(passed){
+      addButtons([{label:"receive certificate",action:showCertificate}]);
+    } else {
+      addButtons([{label:"repeat level 3",action:runL3}]);
+    }
+  });
+}
+
+// ─── CERTIFICATE ──────────────────────────────────────────────────────────────
+function showCertificate(){
+  actionsEl.innerHTML="";
+  archiveScene();
+  sceneEl.innerHTML="";
+
+  const name=prompt("Enter your name for the certificate:","");
+  document.getElementById("cert-name").textContent=name||"Anonymous Student";
+  document.getElementById("cert-date").textContent=new Date().toLocaleDateString("en-CA",{year:"numeric",month:"long",day:"numeric"});
+  const cert=document.getElementById("certificate");
+  cert.style.display="block";
+  scrollBottom();
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+function init(){
+  level=1; updateLevelBar();
+  runL1(0);
+}
+
+init();
+</script>
+</body>
+</html>
